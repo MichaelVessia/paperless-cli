@@ -1,0 +1,23 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["typescript", "unicorn"],
+  "env": {
+    "browser": true,
+    "node": true,
+    "es2022": true
+  },
+  "ignorePatterns": ["dist/**/*", "node_modules/**/*"],
+  "categories": {
+    "correctness": "error"
+  },
+  "rules": {
+    "no-unused-vars": "warn",
+    "@typescript-eslint/no-explicit-any": "off",
+    "no-param-reassign": "error",
+    "prefer-as-const": "error",
+    "default-param-last": "error",
+    "@typescript-eslint/no-inferrable-types": "error",
+    "prefer-arrow-callback": "error",
+    "one-var": ["error", "never"]
+  }
+}

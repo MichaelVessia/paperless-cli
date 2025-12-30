@@ -1,0 +1,16 @@
+{
+  "printWidth": 120,
+  "tabWidth": 2,
+  "useTabs": false,
+  "semi": false,
+  "singleQuote": true,
+  "endOfLine": "lf",
+  "ignorePatterns": [
+    "**/*.css",
+    "**/*.json",
+    "**/*.yaml",
+    "**/*.yml",
+    "**/*.html",
+    "**/*.md"
+  ]
+}

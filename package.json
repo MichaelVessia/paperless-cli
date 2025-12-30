@@ -5,11 +5,17 @@
   "private": true,
   "scripts": {
     "prepare": "effect-language-service patch",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "lint": "oxlint .",
+    "lint:fix": "oxlint --fix .",
+    "format": "oxfmt --check .",
+    "format:fix": "oxfmt ."
   },
   "devDependencies": {
     "@effect/language-service": "^0.63.2",
-    "@types/bun": "latest"
+    "@types/bun": "latest",
+    "oxfmt": "^0.21.0",
+    "oxlint": "^1.36.0"
   },
   "peerDependencies": {
     "typescript": "^5"

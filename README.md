@@ -11,18 +11,48 @@ Effect-based CLI for [Paperless-ngx](https://docs.paperless-ngx.com/) document m
 
 ## Installation
 
+### Homebrew (macOS)
+
 ```bash
-# Clone and install
+brew tap MichaelVessia/tap
+brew install paperless-cli
+```
+
+### With Nix
+
+```bash
+# Run directly
+nix run github:MichaelVessia/paperless-cli -- search "invoice"
+
+# Or install
+nix profile install github:MichaelVessia/paperless-cli
+```
+
+### Download Binary
+
+```bash
+# macOS ARM64 (Apple Silicon)
+curl -L https://github.com/MichaelVessia/paperless-cli/releases/latest/download/paperless-cli-darwin-arm64 -o paperless-cli
+chmod +x paperless-cli && mv paperless-cli /usr/local/bin/
+
+# macOS x64 (Intel)
+curl -L https://github.com/MichaelVessia/paperless-cli/releases/latest/download/paperless-cli-darwin-x64 -o paperless-cli
+chmod +x paperless-cli && mv paperless-cli /usr/local/bin/
+
+# Linux x64
+curl -L https://github.com/MichaelVessia/paperless-cli/releases/latest/download/paperless-cli-linux-x64 -o paperless-cli
+chmod +x paperless-cli && sudo mv paperless-cli /usr/local/bin/
+```
+
+### From Source
+
+Requires [Bun](https://bun.sh/).
+
+```bash
 git clone https://github.com/MichaelVessia/paperless-cli.git
 cd paperless-cli
 bun install
-
-# Run directly
-bun run src/main.ts <command>
-
-# Or build and symlink
 bun run build
-ln -s $(pwd)/dist/paperless-cli ~/.local/bin/paperless-cli
 ```
 
 ## Configuration

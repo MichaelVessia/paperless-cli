@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Superseded by [ADR 0006](0006-modular-cli-structure.md)
 
 ## Context
 

@@ -213,7 +213,7 @@ export const PaperlessClientLive = Layer.effect(
       getSimilarDocuments: (id, limit = 5) =>
         request(HttpClientRequest.get(`/api/documents/?more_like_id=${id}&page_size=${limit}`), DocumentList),
 
-      listTags: () => request(HttpClientRequest.get('/api/tags/'), TagList),
+      listTags: () => request(HttpClientRequest.get('/api/tags/?page_size=10000'), TagList),
 
       findTagByName: (name) =>
         request(HttpClientRequest.get(`/api/tags/?name__iexact=${encodeURIComponent(name)}`), TagList).pipe(
@@ -223,7 +223,8 @@ export const PaperlessClientLive = Layer.effect(
       createTag: (input) =>
         request(HttpClientRequest.post('/api/tags/').pipe(HttpClientRequest.bodyUnsafeJson(input)), Tag),
 
-      listCorrespondents: () => request(HttpClientRequest.get('/api/correspondents/'), CorrespondentList),
+      listCorrespondents: () =>
+        request(HttpClientRequest.get('/api/correspondents/?page_size=10000'), CorrespondentList),
 
       findCorrespondentByName: (name) =>
         request(
@@ -237,7 +238,7 @@ export const PaperlessClientLive = Layer.effect(
           Correspondent,
         ),
 
-      listDocumentTypes: () => request(HttpClientRequest.get('/api/document_types/'), DocumentTypeList),
+      listDocumentTypes: () => request(HttpClientRequest.get('/api/document_types/?page_size=10000'), DocumentTypeList),
 
       findDocumentTypeByName: (name) =>
         request(

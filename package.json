@@ -1,0 +1,22 @@
+{
+  "name": "paperless-cli",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "prepare": "effect-language-service patch",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@effect/language-service": "^0.63.2",
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "@effect/cli": "^0.73.0",
+    "@effect/platform": "^0.94.0",
+    "effect": "^3.19.13"
+  }
+}

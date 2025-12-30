@@ -39,3 +39,6 @@ result
 
 # Lefthook
 .lefthook-local.yml
+
+# bv (beads viewer) local config and caches
+.bv/

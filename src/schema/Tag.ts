@@ -8,6 +8,7 @@ export const MatchingAlgorithm = Schema.Literal(
   3, // literal
   4, // regex
   5, // fuzzy
+  6, // auto
 )
 export type MatchingAlgorithm = typeof MatchingAlgorithm.Type
 
@@ -16,7 +17,7 @@ export class Tag extends Schema.Class<Tag>('Tag')({
   name: Schema.String,
   slug: Schema.String,
   colour: Schema.Number,
-  text_color: Schema.String,
+  text_color: Schema.optionalWith(Schema.String, { default: () => '#ffffff' }),
   match: Schema.String,
   matching_algorithm: MatchingAlgorithm,
   is_inbox_tag: Schema.Boolean,

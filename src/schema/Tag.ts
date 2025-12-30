@@ -22,7 +22,7 @@ export class Tag extends Schema.Class<Tag>('Tag')({
   matching_algorithm: MatchingAlgorithm,
   is_inbox_tag: Schema.Boolean,
   is_insensitive: Schema.Boolean,
-  document_count: Schema.Number,
+  document_count: Schema.optionalWith(Schema.Number, { default: () => 0 }),
 }) {}
 
 export const TagList = Schema.Struct({

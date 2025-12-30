@@ -8,7 +8,7 @@ export class Correspondent extends Schema.Class<Correspondent>('Correspondent')(
   match: Schema.String,
   matching_algorithm: MatchingAlgorithm,
   is_insensitive: Schema.Boolean,
-  document_count: Schema.Number,
+  document_count: Schema.optionalWith(Schema.Number, { default: () => 0 }),
 }) {}
 
 export const CorrespondentList = Schema.Struct({

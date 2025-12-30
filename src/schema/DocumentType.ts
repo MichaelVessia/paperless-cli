@@ -8,7 +8,7 @@ export class DocumentType extends Schema.Class<DocumentType>('DocumentType')({
   match: Schema.String,
   matching_algorithm: MatchingAlgorithm,
   is_insensitive: Schema.Boolean,
-  document_count: Schema.Number,
+  document_count: Schema.optionalWith(Schema.Number, { default: () => 0 }),
 }) {}
 
 export const DocumentTypeList = Schema.Struct({

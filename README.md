@@ -132,7 +132,7 @@ See [docs/adr](docs/adr/) for architecture decision records.
 
 ## Claude Code Integration
 
-This CLI includes a Claude Code skill for natural language document access. See [SKILL.md](SKILL.md) for integration details.
+This CLI includes a Claude Code skill for natural language document access. See [nixos-config/skills/paperless](https://github.com/MichaelVessia/nixos-config/tree/master/modules/programs/claude-code/skills/paperless) for integration details.
 
 ## License
 

@@ -1,0 +1,123 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - run: bun install
+
+      - name: Typecheck
+        run: bun run typecheck
+
+      - name: Lint
+        run: bun run lint
+
+      - name: Test
+        run: bun test
+
+      - name: Build all targets
+        run: |
+          mkdir -p dist
+          bun build src/main.ts --compile --target=bun-linux-x64 --outfile dist/paperless-cli-linux-x64
+          bun build src/main.ts --compile --target=bun-darwin-x64 --outfile dist/paperless-cli-darwin-x64
+          bun build src/main.ts --compile --target=bun-darwin-arm64 --outfile dist/paperless-cli-darwin-arm64
+
+      - name: Create checksums
+        run: |
+          cd dist
+          sha256sum * > checksums.txt
+
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
+
+      - name: Update Homebrew tap
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+
+          # Get SHA256 values
+          SHA_LINUX_X64=$(grep paperless-cli-linux-x64 dist/checksums.txt | cut -d' ' -f1)
+          SHA_DARWIN_X64=$(grep paperless-cli-darwin-x64 dist/checksums.txt | cut -d' ' -f1)
+          SHA_DARWIN_ARM64=$(grep paperless-cli-darwin-arm64 dist/checksums.txt | cut -d' ' -f1)
+
+          # Clone tap repo
+          git clone https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/MichaelVessia/homebrew-tap.git tap
+          cd tap
+
+          # Create/update formula
+          mkdir -p Formula
+          cat > Formula/paperless-cli.rb << FORMULA
+          class PaperlessCli < Formula
+            desc "CLI for Paperless-ngx document management"
+            homepage "https://github.com/MichaelVessia/paperless-cli"
+            version "${VERSION}"
+            license "MIT"
+
+            on_macos do
+              on_arm do
+                url "https://github.com/MichaelVessia/paperless-cli/releases/download/v${VERSION}/paperless-cli-darwin-arm64"
+                sha256 "${SHA_DARWIN_ARM64}"
+              end
+              on_intel do
+                url "https://github.com/MichaelVessia/paperless-cli/releases/download/v${VERSION}/paperless-cli-darwin-x64"
+                sha256 "${SHA_DARWIN_X64}"
+              end
+            end
+
+            on_linux do
+              on_intel do
+                url "https://github.com/MichaelVessia/paperless-cli/releases/download/v${VERSION}/paperless-cli-linux-x64"
+                sha256 "${SHA_LINUX_X64}"
+              end
+            end
+
+            def install
+              if OS.mac?
+                bin.install "paperless-cli-darwin-#{Hardware::CPU.arm? ? "arm64" : "x64"}" => "paperless-cli"
+              else
+                bin.install "paperless-cli-linux-x64" => "paperless-cli"
+              end
+            end
+
+            def caveats
+              <<~EOS
+                paperless-cli requires Paperless-ngx credentials. Set environment variables:
+
+                  export PAPERLESS_URL="https://your-paperless-instance.com"
+                  export PAPERLESS_TOKEN="your-api-token"
+
+                Get an API token from your Paperless-ngx instance:
+                  Settings -> Users -> Edit user -> Generate token
+              EOS
+            end
+
+            test do
+              assert_match "paperless-cli", shell_output("#{bin}/paperless-cli --help")
+            end
+          end
+          FORMULA
+
+          # Commit and push
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/paperless-cli.rb
+          git commit -m "paperless-cli ${VERSION}"
+          git push

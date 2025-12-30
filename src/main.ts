@@ -3,7 +3,7 @@ import { FileSystem, FetchHttpClient, Path } from '@effect/platform'
 import { BunContext, BunRuntime } from '@effect/platform-bun'
 import { Console, Effect, Layer, Option } from 'effect'
 import { PaperlessClient, PaperlessClientLive, PaperlessConfigFromEnv } from './client/PaperlessClient.ts'
-import { TagNotFound } from './errors/index.ts'
+import { TagNotFound, AmbiguousMatch } from './errors/index.ts'
 import {
   formatStatistics,
   formatTagList,
@@ -13,6 +13,31 @@ import {
   formatDocumentFull,
   formatSuccess,
 } from './format/output.ts'
+import type { Tag, TagList } from './schema/index.ts'
+import type { PaperlessClientError } from './client/PaperlessClient.ts'
+
+// Resolve tag name to Tag with fuzzy matching
+const resolveTag = (
+  client: (typeof PaperlessClient)['Service'],
+  tagName: string,
+  cachedTags?: TagList,
+): Effect.Effect<Tag, TagNotFound | AmbiguousMatch | PaperlessClientError> =>
+  Effect.gen(function* () {
+    // Try exact match first
+    const foundTag = yield* client.findTagByName(tagName)
+    if (foundTag) return foundTag
+
+    // Fall back to partial match
+    const allTags = cachedTags ?? (yield* client.listTags())
+    const lowerName = tagName.toLowerCase()
+    const matches = allTags.results.filter((t: Tag) => t.name.toLowerCase().includes(lowerName))
+
+    if (matches.length === 1) return matches[0]!
+    if (matches.length > 1) {
+      return yield* Effect.fail(new AmbiguousMatch({ type: 'tag', matches: matches.map((t: Tag) => t.name) }))
+    }
+    return yield* Effect.fail(new TagNotFound({ name: tagName }))
+  })
 
 // Command options registry for better error messages
 // Maps command name -> Set of valid flags (--name and -alias forms)
@@ -278,27 +303,22 @@ const search = Command.make(
       const typeName = Option.getOrUndefined(type)
       const queryStr = Option.getOrUndefined(query)
 
-      // Resolve tag names to IDs (with fuzzy matching)
+      // Resolve tag names to IDs
       const tagIds: number[] = []
       for (const tagName of tagNames) {
-        // Try exact match first
-        let foundTag = yield* client.findTagByName(tagName)
-        if (!foundTag) {
-          // Fall back to partial match
-          const allTags = yield* client.listTags()
-          const lowerName = tagName.toLowerCase()
-          const matches = allTags.results.filter((t) => t.name.toLowerCase().includes(lowerName))
-          if (matches.length === 1) {
-            foundTag = matches[0]!
-          } else if (matches.length > 1) {
-            yield* Console.error(`Tag "${tagName}" is ambiguous. Matches: ${matches.map((t) => t.name).join(', ')}`)
-            return
-          } else {
-            yield* Console.error(`Tag not found: ${tagName}`)
-            return
-          }
+        const result = yield* resolveTag(client, tagName).pipe(
+          Effect.mapError((e) =>
+            e._tag === 'AmbiguousMatch'
+              ? `Tag "${tagName}" is ambiguous. Matches: ${e.matches.join(', ')}`
+              : `Tag not found: ${tagName}`,
+          ),
+          Effect.either,
+        )
+        if (result._tag === 'Left') {
+          yield* Console.error(result.left)
+          return
         }
-        tagIds.push(foundTag.id)
+        tagIds.push(result.right.id)
       }
 
       // Resolve correspondent name to ID
@@ -394,26 +414,21 @@ const list = Command.make(
         if (inboxTag) tagIds.push(inboxTag.id)
       }
 
-      // Resolve tag names to IDs (with fuzzy matching)
+      // Resolve tag names to IDs
       for (const tagName of tagNames) {
-        // Try exact match first
-        let foundTag = yield* client.findTagByName(tagName)
-        if (!foundTag) {
-          // Fall back to partial match
-          if (!allTags) allTags = yield* client.listTags()
-          const lowerName = tagName.toLowerCase()
-          const matches = allTags.results.filter((t) => t.name.toLowerCase().includes(lowerName))
-          if (matches.length === 1) {
-            foundTag = matches[0]!
-          } else if (matches.length > 1) {
-            yield* Console.error(`Tag "${tagName}" is ambiguous. Matches: ${matches.map((t) => t.name).join(', ')}`)
-            return
-          } else {
-            yield* Console.error(`Tag not found: ${tagName}`)
-            return
-          }
+        const result = yield* resolveTag(client, tagName, allTags).pipe(
+          Effect.mapError((e) =>
+            e._tag === 'AmbiguousMatch'
+              ? `Tag "${tagName}" is ambiguous. Matches: ${e.matches.join(', ')}`
+              : `Tag not found: ${tagName}`,
+          ),
+          Effect.either,
+        )
+        if (result._tag === 'Left') {
+          yield* Console.error(result.left)
+          return
         }
-        tagIds.push(foundTag.id)
+        tagIds.push(result.right.id)
       }
 
       // Resolve correspondent name to ID
@@ -686,23 +701,22 @@ const addTag = Command.make(
       const client = yield* PaperlessClient
 
       // Find tag (with fuzzy matching)
-      let tag = yield* client.findTagByName(tagName)
-      if (!tag) {
-        // Try partial match
-        const allTags = yield* client.listTags()
-        const lowerName = tagName.toLowerCase()
-        const matches = allTags.results.filter((t) => t.name.toLowerCase().includes(lowerName))
-        if (matches.length === 1) {
-          tag = matches[0]!
-        } else if (matches.length > 1) {
-          yield* Console.error(`Tag "${tagName}" is ambiguous. Matches: ${matches.map((t) => t.name).join(', ')}`)
+      const tagResult = yield* resolveTag(client, tagName).pipe(Effect.either)
+      let tag: Tag
+      if (tagResult._tag === 'Left') {
+        const err = tagResult.left
+        if (err._tag === 'AmbiguousMatch') {
+          yield* Console.error(`Tag "${tagName}" is ambiguous. Matches: ${err.matches.join(', ')}`)
           return
-        } else if (create) {
+        }
+        if (create) {
           tag = yield* client.createTag({ name: tagName })
           yield* Console.log(`Created tag "${tagName}"`)
         } else {
-          return yield* Effect.fail(new TagNotFound({ name: tagName }))
+          return yield* Effect.fail(err)
         }
+      } else {
+        tag = tagResult.right
       }
 
       // Get document and add tag
@@ -720,21 +734,16 @@ const removeTag = Command.make('remove-tag', { id: docIdArg, tagName: tagNameArg
     const client = yield* PaperlessClient
 
     // Find tag (with fuzzy matching)
-    let tag = yield* client.findTagByName(tagName)
-    if (!tag) {
-      // Try partial match
-      const allTags = yield* client.listTags()
-      const lowerName = tagName.toLowerCase()
-      const matches = allTags.results.filter((t) => t.name.toLowerCase().includes(lowerName))
-      if (matches.length === 1) {
-        tag = matches[0]!
-      } else if (matches.length > 1) {
-        yield* Console.error(`Tag "${tagName}" is ambiguous. Matches: ${matches.map((t) => t.name).join(', ')}`)
+    const tagResult = yield* resolveTag(client, tagName).pipe(Effect.either)
+    if (tagResult._tag === 'Left') {
+      const err = tagResult.left
+      if (err._tag === 'AmbiguousMatch') {
+        yield* Console.error(`Tag "${tagName}" is ambiguous. Matches: ${err.matches.join(', ')}`)
         return
-      } else {
-        return yield* Effect.fail(new TagNotFound({ name: tagName }))
       }
+      return yield* Effect.fail(err)
     }
+    const tag = tagResult.right
 
     // Get document and remove tag (idempotent)
     const doc = yield* client.getDocument(id)

@@ -107,8 +107,8 @@ const createType = Command.make('create-type', { name: createTypeName }, ({ name
 const searchQuery = Args.text({ name: 'query' }).pipe(Args.optional)
 const searchTagOption = Options.text('tag').pipe(
   Options.withAlias('t'),
-  Options.withDescription('Filter by tag name'),
-  Options.optional,
+  Options.withDescription('Filter by tag name (repeatable for AND)'),
+  Options.repeated,
 )
 const searchCorrespondentOption = Options.text('correspondent').pipe(
   Options.withAlias('c'),
@@ -125,6 +125,22 @@ const limitOption = Options.integer('limit').pipe(
   Options.withDescription('Max results (default: 10)'),
   Options.withDefault(10),
 )
+const afterOption = Options.text('after').pipe(
+  Options.withDescription('Filter by created date after (YYYY-MM-DD)'),
+  Options.optional,
+)
+const beforeOption = Options.text('before').pipe(
+  Options.withDescription('Filter by created date before (YYYY-MM-DD)'),
+  Options.optional,
+)
+const countOption = Options.boolean('count').pipe(
+  Options.withDescription('Only output result count'),
+  Options.withDefault(false),
+)
+const allOption = Options.boolean('all').pipe(
+  Options.withDescription('Return all results (no pagination)'),
+  Options.withDefault(false),
+)
 
 const search = Command.make(
   'search',
@@ -133,26 +149,41 @@ const search = Command.make(
     tag: searchTagOption,
     correspondent: searchCorrespondentOption,
     type: searchTypeOption,
+    after: afterOption,
+    before: beforeOption,
     limit: limitOption,
+    all: allOption,
+    count: countOption,
     json: jsonOption,
   },
-  ({ query, tag, correspondent, type, limit, json }) =>
+  ({ query, tag: tagNames, correspondent, type, after, before, limit, all, count, json }) =>
     Effect.gen(function* () {
       const client = yield* PaperlessClient
-      const tagName = Option.getOrUndefined(tag)
       const correspondentName = Option.getOrUndefined(correspondent)
       const typeName = Option.getOrUndefined(type)
       const queryStr = Option.getOrUndefined(query)
 
-      // Resolve tag name to ID
-      let tagId: number | undefined
-      if (tagName) {
-        const foundTag = yield* client.findTagByName(tagName)
+      // Resolve tag names to IDs (with fuzzy matching)
+      const tagIds: number[] = []
+      for (const tagName of tagNames) {
+        // Try exact match first
+        let foundTag = yield* client.findTagByName(tagName)
         if (!foundTag) {
-          yield* Console.error(`Tag not found: ${tagName}`)
-          return
+          // Fall back to partial match
+          const allTags = yield* client.listTags()
+          const lowerName = tagName.toLowerCase()
+          const matches = allTags.results.filter((t) => t.name.toLowerCase().includes(lowerName))
+          if (matches.length === 1) {
+            foundTag = matches[0]!
+          } else if (matches.length > 1) {
+            yield* Console.error(`Tag "${tagName}" is ambiguous. Matches: ${matches.map((t) => t.name).join(', ')}`)
+            return
+          } else {
+            yield* Console.error(`Tag not found: ${tagName}`)
+            return
+          }
         }
-        tagId = foundTag.id
+        tagIds.push(foundTag.id)
       }
 
       // Resolve correspondent name to ID
@@ -177,14 +208,21 @@ const search = Command.make(
         typeId = found.id
       }
 
-      const searchParams: Parameters<typeof client.searchDocuments>[0] = { limit }
+      const afterDate = Option.getOrUndefined(after)
+      const beforeDate = Option.getOrUndefined(before)
+      const effectiveLimit = all ? 10000 : limit
+      const searchParams: Parameters<typeof client.searchDocuments>[0] = { limit: effectiveLimit }
       if (queryStr) searchParams.query = queryStr
-      if (tagId !== undefined) searchParams.tags = [tagId]
+      if (tagIds.length > 0) searchParams.tags = tagIds
       if (correspondentId !== undefined) searchParams.correspondent = correspondentId
       if (typeId !== undefined) searchParams.documentType = typeId
+      if (afterDate) searchParams.createdAfter = afterDate
+      if (beforeDate) searchParams.createdBefore = beforeDate
       const result = yield* client.searchDocuments(searchParams)
 
-      if (json) {
+      if (count) {
+        yield* Console.log(String(result.count))
+      } else if (json) {
         yield* Console.log(JSON.stringify(result, null, 2))
       } else if (result.results.length === 0) {
         // Empty results - no output per spec
@@ -219,30 +257,46 @@ const list = Command.make(
     tag: searchTagOption,
     correspondent: searchCorrespondentOption,
     type: searchTypeOption,
+    after: afterOption,
+    before: beforeOption,
     limit: limitOption,
+    all: allOption,
+    count: countOption,
     json: jsonOption,
   },
-  ({ inbox, tag, correspondent, type, limit, json }) =>
+  ({ inbox, tag: tagNames, correspondent, type, after, before, limit, all, count, json }) =>
     Effect.gen(function* () {
       const client = yield* PaperlessClient
-      const tagName = Option.getOrUndefined(tag)
       const correspondentName = Option.getOrUndefined(correspondent)
       const typeName = Option.getOrUndefined(type)
 
       // Get inbox tag if needed
       const tagIds: number[] = []
+      let allTags: typeof import('./schema/index.ts').TagList.Type | undefined
       if (inbox) {
-        const tagsResult = yield* client.listTags()
-        const inboxTag = tagsResult.results.find((t) => t.is_inbox_tag)
+        allTags = yield* client.listTags()
+        const inboxTag = allTags.results.find((t) => t.is_inbox_tag)
         if (inboxTag) tagIds.push(inboxTag.id)
       }
 
-      // Resolve tag name to ID
-      if (tagName) {
-        const foundTag = yield* client.findTagByName(tagName)
+      // Resolve tag names to IDs (with fuzzy matching)
+      for (const tagName of tagNames) {
+        // Try exact match first
+        let foundTag = yield* client.findTagByName(tagName)
         if (!foundTag) {
-          yield* Console.error(`Tag not found: ${tagName}`)
-          return
+          // Fall back to partial match
+          if (!allTags) allTags = yield* client.listTags()
+          const lowerName = tagName.toLowerCase()
+          const matches = allTags.results.filter((t) => t.name.toLowerCase().includes(lowerName))
+          if (matches.length === 1) {
+            foundTag = matches[0]!
+          } else if (matches.length > 1) {
+            yield* Console.error(`Tag "${tagName}" is ambiguous. Matches: ${matches.map((t) => t.name).join(', ')}`)
+            return
+          } else {
+            yield* Console.error(`Tag not found: ${tagName}`)
+            return
+          }
         }
         tagIds.push(foundTag.id)
       }
@@ -269,16 +323,23 @@ const list = Command.make(
         typeId = found.id
       }
 
+      const afterDate = Option.getOrUndefined(after)
+      const beforeDate = Option.getOrUndefined(before)
+      const effectiveLimit = all ? 10000 : limit
       const listParams: Parameters<typeof client.searchDocuments>[0] = {
         ordering: '-added',
-        limit,
+        limit: effectiveLimit,
       }
       if (tagIds.length > 0) listParams.tags = tagIds
       if (correspondentId !== undefined) listParams.correspondent = correspondentId
       if (typeId !== undefined) listParams.documentType = typeId
+      if (afterDate) listParams.createdAfter = afterDate
+      if (beforeDate) listParams.createdBefore = beforeDate
       const result = yield* client.searchDocuments(listParams)
 
-      if (json) {
+      if (count) {
+        yield* Console.log(String(result.count))
+      } else if (json) {
         yield* Console.log(JSON.stringify(result, null, 2))
       } else if (result.results.length === 0) {
         yield* Console.log('No documents found.')
@@ -509,10 +570,19 @@ const addTag = Command.make(
     Effect.gen(function* () {
       const client = yield* PaperlessClient
 
-      // Find tag
+      // Find tag (with fuzzy matching)
       let tag = yield* client.findTagByName(tagName)
       if (!tag) {
-        if (create) {
+        // Try partial match
+        const allTags = yield* client.listTags()
+        const lowerName = tagName.toLowerCase()
+        const matches = allTags.results.filter((t) => t.name.toLowerCase().includes(lowerName))
+        if (matches.length === 1) {
+          tag = matches[0]!
+        } else if (matches.length > 1) {
+          yield* Console.error(`Tag "${tagName}" is ambiguous. Matches: ${matches.map((t) => t.name).join(', ')}`)
+          return
+        } else if (create) {
           tag = yield* client.createTag({ name: tagName })
           yield* Console.log(`Created tag "${tagName}"`)
         } else {
@@ -534,10 +604,21 @@ const removeTag = Command.make('remove-tag', { id: docIdArg, tagName: tagNameArg
   Effect.gen(function* () {
     const client = yield* PaperlessClient
 
-    // Find tag
-    const tag = yield* client.findTagByName(tagName)
+    // Find tag (with fuzzy matching)
+    let tag = yield* client.findTagByName(tagName)
     if (!tag) {
-      return yield* Effect.fail(new TagNotFound({ name: tagName }))
+      // Try partial match
+      const allTags = yield* client.listTags()
+      const lowerName = tagName.toLowerCase()
+      const matches = allTags.results.filter((t) => t.name.toLowerCase().includes(lowerName))
+      if (matches.length === 1) {
+        tag = matches[0]!
+      } else if (matches.length > 1) {
+        yield* Console.error(`Tag "${tagName}" is ambiguous. Matches: ${matches.map((t) => t.name).join(', ')}`)
+        return
+      } else {
+        return yield* Effect.fail(new TagNotFound({ name: tagName }))
+      }
     }
 
     // Get document and remove tag (idempotent)

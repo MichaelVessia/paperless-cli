@@ -11,6 +11,7 @@ export { similar } from './commands/similar.ts'
 export { edit } from './commands/edit.ts'
 export { addTag } from './commands/add-tag.ts'
 export { removeTag } from './commands/remove-tag.ts'
+export { upload } from './commands/upload.ts'
 
 // Helpers
 export { handleFlagOrderingError } from './helpers.ts'

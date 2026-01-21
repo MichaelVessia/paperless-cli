@@ -187,4 +187,8 @@ export const MockPaperlessClient = Layer.succeed(PaperlessClient, {
         filename: doc.original_file_name,
       }
     }),
+
+  uploadDocument: () =>
+    // Return a mock task UUID
+    Effect.succeed('mock-task-uuid-12345'),
 })

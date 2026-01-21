@@ -63,6 +63,7 @@ export const commandOptions: Record<string, Set<string>> = {
   ]),
   get: new Set(['--content-only', '--max-length', '-m', '--json']),
   download: new Set(['--output', '-o', '--force', '-f']),
+  upload: new Set(['--title', '-t', '--correspondent', '--type', '--tag', '--create']),
   similar: new Set(['--limit', '-l', '--json']),
   edit: new Set(['--title', '--correspondent', '--type', '--no-correspondent', '--no-type', '--create']),
   'add-tag': new Set(['--create']),

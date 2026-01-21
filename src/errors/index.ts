@@ -11,6 +11,9 @@ export class DocumentNotFound extends Data.TaggedError('DocumentNotFound')<{
 export class TagNotFound extends Data.TaggedError('TagNotFound')<{
   name: string
 }> {}
+export class FileNotFound extends Data.TaggedError('FileNotFound')<{
+  path: string
+}> {}
 
 // Validation errors
 export class AmbiguousMatch extends Data.TaggedError('AmbiguousMatch')<{

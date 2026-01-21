@@ -103,6 +103,18 @@ export class PaperlessClient extends Context.Tag('PaperlessClient')<
     readonly downloadDocument: (
       id: number,
     ) => Effect.Effect<{ content: Uint8Array; filename: string }, PaperlessClientError | DocumentNotFound>
+
+    // Upload
+    readonly uploadDocument: (
+      file: Uint8Array,
+      filename: string,
+      options?: {
+        title?: string
+        correspondent?: number
+        documentType?: number
+        tags?: readonly number[]
+      },
+    ) => Effect.Effect<string, PaperlessClientError>
   }
 >() {}
 
@@ -284,6 +296,53 @@ export const PaperlessClientLive = Layer.effect(
             () => Effect.fail(new DocumentNotFound({ id })),
           ),
         ),
+
+      uploadDocument: (file, filename, options) =>
+        Effect.gen(function* () {
+          const formData = new FormData()
+          formData.append('document', new Blob([file]), filename)
+          if (options?.title) formData.append('title', options.title)
+          if (options?.correspondent !== undefined) formData.append('correspondent', String(options.correspondent))
+          if (options?.documentType !== undefined) formData.append('document_type', String(options.documentType))
+          if (options?.tags) {
+            for (const tagId of options.tags) {
+              formData.append('tags', String(tagId))
+            }
+          }
+
+          const response = yield* baseClient
+            .execute(
+              HttpClientRequest.post('/api/documents/post_document/').pipe(HttpClientRequest.bodyFormData(formData)),
+            )
+            .pipe(
+              Effect.mapError((e): PaperlessClientError => {
+                if (e._tag === 'RequestError') {
+                  return new ConnectionFailed({ url: e.request.url })
+                }
+                if (e.response.status === 401) {
+                  return new InvalidToken()
+                }
+                return new ServerError({
+                  status: e.response.status,
+                  message: e.reason,
+                })
+              }),
+            )
+
+          // Server returns 200 with task UUID in response body
+          const text = yield* response.text.pipe(
+            Effect.mapError(
+              (): PaperlessClientError =>
+                new ServerError({
+                  status: 0,
+                  message: 'Failed to read upload response',
+                }),
+            ),
+          )
+
+          // Response is just the task UUID as plain text
+          return text.trim()
+        }),
     }
   }),
 )

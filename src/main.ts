@@ -19,6 +19,7 @@ import {
   edit,
   addTag,
   removeTag,
+  upload,
   handleFlagOrderingError,
 } from './cli/index.ts'
 
@@ -30,6 +31,7 @@ const mainCommand = Command.make('paperless-cli').pipe(
     list,
     get,
     download,
+    upload,
     similar,
     edit,
     addTag,

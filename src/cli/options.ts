@@ -1,11 +1,5 @@
 import { Args, Options } from '@effect/cli'
 
-// Global options
-export const jsonOption = Options.boolean('json').pipe(
-  Options.withDescription('Output raw JSON'),
-  Options.withDefault(false),
-)
-
 export const limitOption = Options.integer('limit').pipe(
   Options.withAlias('l'),
   Options.withDescription('Max results (default: 10)'),
@@ -14,11 +8,6 @@ export const limitOption = Options.integer('limit').pipe(
 
 export const allOption = Options.boolean('all').pipe(
   Options.withDescription('Return all results (no pagination)'),
-  Options.withDefault(false),
-)
-
-export const countOption = Options.boolean('count').pipe(
-  Options.withDescription('Only output result count'),
   Options.withDefault(false),
 )
 

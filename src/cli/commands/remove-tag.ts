@@ -1,11 +1,12 @@
 import { Command } from '@effect/cli'
-import { Console, Effect } from 'effect'
+import { Effect } from 'effect'
 import { PaperlessClient } from '../../client/PaperlessClient.ts'
-import { formatSuccess } from '../../format/output.ts'
+import * as Envelope from '../../envelope/index.ts'
+import * as NextActions from '../../envelope/next-actions.ts'
 import { resolveTag } from '../helpers.ts'
 import { docIdArg, tagNameArg } from '../options.ts'
 
-export const removeTag = Command.make('remove-tag', { id: docIdArg, tagName: tagNameArg }, ({ id, tagName }) =>
+export const removeTagHandler = (id: number, tagName: string) =>
   Effect.gen(function* () {
     const client = yield* PaperlessClient
 
@@ -14,8 +15,13 @@ export const removeTag = Command.make('remove-tag', { id: docIdArg, tagName: tag
     if (tagResult._tag === 'Left') {
       const err = tagResult.left
       if (err._tag === 'AmbiguousMatch') {
-        yield* Console.error(`Tag "${tagName}" is ambiguous. Matches: ${err.matches.join(', ')}`)
-        return
+        return Envelope.error(
+          'remove-tag',
+          `Tag "${tagName}" is ambiguous. Matches: ${err.matches.join(', ')}`,
+          'AmbiguousMatch',
+          'Specify the full tag name.',
+          [NextActions.listTags()],
+        )
       }
       return yield* Effect.fail(err)
     }
@@ -23,10 +29,19 @@ export const removeTag = Command.make('remove-tag', { id: docIdArg, tagName: tag
 
     // Get document and remove tag (idempotent)
     const doc = yield* client.getDocument(id)
-    const newTags = doc.tags.filter((t) => t !== tag.id)
-    if (newTags.length !== doc.tags.length) {
+    const wasPresent = doc.tags.includes(tag.id)
+    if (wasPresent) {
+      const newTags = doc.tags.filter((t) => t !== tag.id)
       yield* client.editDocument(id, { tags: newTags })
     }
-    yield* Console.log(formatSuccess(`Removed tag "${tag.name}" from document ${id}`))
-  }),
+
+    return Envelope.success(
+      'remove-tag',
+      { document_id: id, tag: { id: tag.id, name: tag.name }, was_present: wasPresent },
+      [NextActions.getDocument(id), NextActions.addTag(id)],
+    )
+  })
+
+export const removeTag = Command.make('remove-tag', { id: docIdArg, tagName: tagNameArg }, ({ id, tagName }) =>
+  removeTagHandler(id, tagName).pipe(Effect.flatMap(Envelope.output)),
 ).pipe(Command.withDescription('Remove tag from document'))

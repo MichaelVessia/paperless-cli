@@ -1,8 +1,9 @@
 import { Command, Options } from '@effect/cli'
 import { FileSystem, Path } from '@effect/platform'
-import { Console, Effect, Option } from 'effect'
+import { Effect, Option } from 'effect'
 import { PaperlessClient } from '../../client/PaperlessClient.ts'
-import { formatSuccess } from '../../format/output.ts'
+import * as Envelope from '../../envelope/index.ts'
+import * as NextActions from '../../envelope/next-actions.ts'
 import { docIdArg } from '../options.ts'
 
 const outputOption = Options.file('output').pipe(
@@ -16,27 +17,44 @@ const forceOption = Options.boolean('force').pipe(
   Options.withDefault(false),
 )
 
+export const downloadHandler = (id: number, outputPath: Option.Option<string>, force: boolean) =>
+  Effect.gen(function* () {
+    const client = yield* PaperlessClient
+    const fs = yield* FileSystem.FileSystem
+    const pathService = yield* Path.Path
+    const outPath = Option.getOrUndefined(outputPath)
+
+    const result = yield* client.downloadDocument(id)
+    const targetPath = outPath ?? pathService.join(process.cwd(), result.filename)
+
+    // Check if file exists
+    const exists = yield* fs.exists(targetPath)
+    if (exists && !force) {
+      return Envelope.error(
+        'download',
+        `File already exists: ${targetPath}`,
+        'FileExists',
+        'Use --force to overwrite.',
+        [NextActions.getDocument(id)],
+      )
+    }
+
+    yield* fs.writeFile(targetPath, result.content)
+
+    return Envelope.success(
+      'download',
+      {
+        document_id: id,
+        filename: result.filename,
+        path: targetPath,
+        size_bytes: result.content.byteLength,
+      },
+      [NextActions.getDocument(id), NextActions.similarDocuments(id)],
+    )
+  })
+
 export const download = Command.make(
   'download',
   { id: docIdArg, output: outputOption, force: forceOption },
-  ({ id, output, force }) =>
-    Effect.gen(function* () {
-      const client = yield* PaperlessClient
-      const fs = yield* FileSystem.FileSystem
-      const pathService = yield* Path.Path
-      const outputPath = Option.getOrUndefined(output)
-
-      const result = yield* client.downloadDocument(id)
-      const targetPath = outputPath ?? pathService.join(process.cwd(), result.filename)
-
-      // Check if file exists
-      const exists = yield* fs.exists(targetPath)
-      if (exists && !force) {
-        yield* Console.error(`File already exists: ${targetPath}\nUse --force to overwrite.`)
-        return
-      }
-
-      yield* fs.writeFile(targetPath, result.content)
-      yield* Console.log(formatSuccess(`Downloaded to ${targetPath}`))
-    }),
+  ({ id, output: outputPath, force }) => downloadHandler(id, outputPath, force).pipe(Effect.flatMap(Envelope.output)),
 ).pipe(Command.withDescription('Download document'))

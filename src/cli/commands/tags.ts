@@ -1,26 +1,31 @@
 import { Command } from '@effect/cli'
-import { Console, Effect } from 'effect'
+import { Effect } from 'effect'
 import { PaperlessClient } from '../../client/PaperlessClient.ts'
-import { formatTagList, formatSuccess } from '../../format/output.ts'
-import { jsonOption, nameArg } from '../options.ts'
+import * as Envelope from '../../envelope/index.ts'
+import * as NextActions from '../../envelope/next-actions.ts'
+import { nameArg } from '../options.ts'
 
-export const tags = Command.make('tags', { json: jsonOption }, ({ json }) =>
+export const tagsHandler = () =>
   Effect.gen(function* () {
     const client = yield* PaperlessClient
     const result = yield* client.listTags()
+    return Envelope.success('tags', { count: result.count, tags: result.results }, [
+      NextActions.createTag(),
+      NextActions.searchDocuments(),
+    ])
+  })
 
-    if (json) {
-      yield* Console.log(JSON.stringify(result, null, 2))
-    } else {
-      yield* Console.log(formatTagList(result.results))
-    }
-  }),
-).pipe(Command.withDescription('List all tags'))
+export const tags = Command.make('tags', {}, () => tagsHandler().pipe(Effect.flatMap(Envelope.output))).pipe(
+  Command.withDescription('List all tags'),
+)
 
-export const createTag = Command.make('create-tag', { name: nameArg }, ({ name }) =>
+export const createTagHandler = (name: string) =>
   Effect.gen(function* () {
     const client = yield* PaperlessClient
     const tag = yield* client.createTag({ name })
-    yield* Console.log(formatSuccess(`Created tag "${tag.name}" (id: ${tag.id})`))
-  }),
+    return Envelope.success('create-tag', tag, [NextActions.listTags(), NextActions.searchDocuments()])
+  })
+
+export const createTag = Command.make('create-tag', { name: nameArg }, ({ name }) =>
+  createTagHandler(name).pipe(Effect.flatMap(Envelope.output)),
 ).pipe(Command.withDescription('Create a new tag'))

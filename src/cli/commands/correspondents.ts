@@ -1,26 +1,34 @@
 import { Command } from '@effect/cli'
-import { Console, Effect } from 'effect'
+import { Effect } from 'effect'
 import { PaperlessClient } from '../../client/PaperlessClient.ts'
-import { formatCorrespondentList, formatSuccess } from '../../format/output.ts'
-import { jsonOption, nameArg } from '../options.ts'
+import * as Envelope from '../../envelope/index.ts'
+import * as NextActions from '../../envelope/next-actions.ts'
+import { nameArg } from '../options.ts'
 
-export const correspondents = Command.make('correspondents', { json: jsonOption }, ({ json }) =>
+export const correspondentsHandler = () =>
   Effect.gen(function* () {
     const client = yield* PaperlessClient
     const result = yield* client.listCorrespondents()
+    return Envelope.success('correspondents', { count: result.count, correspondents: result.results }, [
+      NextActions.createCorrespondent(),
+      NextActions.searchDocuments(),
+    ])
+  })
 
-    if (json) {
-      yield* Console.log(JSON.stringify(result, null, 2))
-    } else {
-      yield* Console.log(formatCorrespondentList(result.results))
-    }
-  }),
+export const correspondents = Command.make('correspondents', {}, () =>
+  correspondentsHandler().pipe(Effect.flatMap(Envelope.output)),
 ).pipe(Command.withDescription('List all correspondents'))
 
-export const createCorrespondent = Command.make('create-correspondent', { name: nameArg }, ({ name }) =>
+export const createCorrespondentHandler = (name: string) =>
   Effect.gen(function* () {
     const client = yield* PaperlessClient
     const correspondent = yield* client.createCorrespondent({ name })
-    yield* Console.log(formatSuccess(`Created correspondent "${correspondent.name}" (id: ${correspondent.id})`))
-  }),
+    return Envelope.success('create-correspondent', correspondent, [
+      NextActions.listCorrespondents(),
+      NextActions.searchDocuments(),
+    ])
+  })
+
+export const createCorrespondent = Command.make('create-correspondent', { name: nameArg }, ({ name }) =>
+  createCorrespondentHandler(name).pipe(Effect.flatMap(Envelope.output)),
 ).pipe(Command.withDescription('Create a new correspondent'))

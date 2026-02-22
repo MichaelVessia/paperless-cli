@@ -18,19 +18,42 @@ Effect-based CLI for Paperless-ngx with a Claude skill for natural language acce
 - **HTTP**: @effect/platform HttpClient
 - **Validation**: effect/Schema
 
-## CLI Specification
+## Output Format
 
-### Installation
+All commands output structured JSON envelopes. No human-readable text output.
 
-```bash
-# Clone and build
-cd ~/Projects/paperless-cli
-bun install
-bun run build
+### Success Envelope
 
-# Symlink to PATH
-ln -s ~/Projects/paperless-cli/dist/paperless-cli ~/.local/bin/paperless-cli
+```json
+{
+  "ok": true,
+  "command": "search",
+  "result": { ... },
+  "next_actions": [
+    { "command": "paperless-cli get 1", "description": "View full document details" }
+  ]
+}
 ```
+
+### Error Envelope
+
+```json
+{
+  "ok": false,
+  "command": "search",
+  "error": { "message": "Tag not found: foo", "code": "TagNotFound" },
+  "fix": "Check available tags with \"paperless-cli tags\".",
+  "next_actions": [
+    { "command": "paperless-cli tags", "description": "List all tags" }
+  ]
+}
+```
+
+### Self-Documenting Root
+
+Running `paperless-cli` with no subcommand outputs a JSON command tree describing all available commands, their arguments, flags, and required environment variables.
+
+## CLI Specification
 
 ### Configuration
 
@@ -44,8 +67,7 @@ Environment variables only. No config file.
 ### Global Flags
 
 - `--version` - Show version number
-- `--json` - Output raw JSON (available on most commands)
-- `--help` - Show help
+- `--help` - Show help (human-readable, for debugging)
 
 ---
 
@@ -53,13 +75,12 @@ Environment variables only. No config file.
 
 ### `search [query]`
 
-Full-text search across documents. Query is optional—filters can be used alone.
+Full-text search across documents. Query is optional, filters can be used alone.
 
 ```bash
 paperless-cli search "tax 2023"
-paperless-cli search --tag=tax --after=-1y
+paperless-cli search --tag=tax
 paperless-cli search "invoice" --correspondent=comcast --limit=20
-paperless-cli search --type=receipt --sort=created
 ```
 
 **Arguments:**
@@ -69,41 +90,35 @@ paperless-cli search --type=receipt --sort=created
 - `--tag, -t <name>` - Filter by tag name (repeatable)
 - `--correspondent, -c <name>` - Filter by correspondent name (case-insensitive)
 - `--type, -d <name>` - Filter by document type name (case-insensitive)
-- `--after <date>` - Documents created after date
-- `--before <date>` - Documents created before date
-- `--sort <field>` - Sort by: created, added, modified, title, correspondent, type (default: relevance for queries, added for no query)
-- `--sort <field>:asc` - Ascending sort (default is descending/newest first)
-- `--limit, -l <n>` - Max results (default: 10, max: 100)
-- `--json` - Output raw JSON
+- `--after <date>` - Documents created after date (YYYY-MM-DD)
+- `--before <date>` - Documents created before date (YYYY-MM-DD)
+- `--limit, -l <n>` - Max results (default: 10)
+- `--all` - Return all results (no pagination)
 
-**Date formats:**
-- ISO 8601: `2023-01-01`
-- Relative: `-7d` (7 days ago), `-1m` (1 month ago), `-1y` (1 year ago)
+**Result:** `{ count, documents: DocumentSummary[] }`
 
-**Output (default):**
+Each `DocumentSummary` has inline-resolved names:
+```json
+{
+  "id": 1,
+  "title": "Amazon Order",
+  "created_date": "2024-01-15",
+  "correspondent": { "id": 1, "name": "Amazon" },
+  "document_type": { "id": 2, "name": "Receipt" },
+  "tags": [{ "id": 4, "name": "receipt" }]
+}
 ```
-[1234] 2023 W-2 Form
-       Correspondent: Employer Inc
-       Tags: tax, 2023, income
-       Created: 2023-01-15
-       Preview: Wage and Tax Statement for tax year 2023...
-
-[1235] 2023 1099-INT
-       ...
-```
-
-**Empty results:** No output, exit 0. With `--json`: empty array.
 
 ---
 
 ### `list`
 
-List recent documents.
+List recent documents (ordered by added date).
 
 ```bash
 paperless-cli list
 paperless-cli list --inbox
-paperless-cli list --limit=20 --sort=created
+paperless-cli list --limit=20
 ```
 
 **Flags:**
@@ -111,9 +126,12 @@ paperless-cli list --limit=20 --sort=created
 - `--tag, -t <name>` - Filter by tag name (repeatable)
 - `--correspondent, -c <name>` - Filter by correspondent
 - `--type, -d <name>` - Filter by document type
-- `--sort <field>` - Sort by: created, added, modified, title, correspondent, type (default: added)
-- `--limit, -l <n>` - Max results (default: 10, max: 100)
-- `--json` - Output raw JSON
+- `--after <date>` - Documents created after date
+- `--before <date>` - Documents created before date
+- `--limit, -l <n>` - Max results (default: 10)
+- `--all` - Return all results
+
+**Result:** `{ count, documents: DocumentSummary[] }`
 
 ---
 
@@ -123,22 +141,30 @@ Retrieve full document content and metadata.
 
 ```bash
 paperless-cli get 1234
-paperless-cli get 1234 --content-only
-paperless-cli get 1234 --json
+paperless-cli get 1234 --max-length=1000
 ```
 
 **Arguments:**
 - `id` - Document ID (required)
 
 **Flags:**
-- `--content-only` - Only output document text (for piping)
 - `--max-length, -m <n>` - Truncate content (default: 50000 chars)
-- `--json` - Output raw JSON
 
-**Output includes:**
-- Document metadata (title, correspondent, type, tags, dates)
-- Download URL for original file
-- OCR text content (truncated if needed)
+**Result:** `DocumentDetail` with content truncation info:
+```json
+{
+  "id": 1,
+  "title": "...",
+  "content": { "text": "...", "truncated": false, "original_length": 5000 },
+  "correspondent": { "id": 1, "name": "Amazon" },
+  "document_type": { "id": 2, "name": "Receipt" },
+  "tags": [...],
+  "added": "2024-01-15T10:35:00Z",
+  "modified": "2024-01-15T10:30:00Z",
+  "archive_serial_number": null,
+  "original_file_name": "receipt.pdf"
+}
+```
 
 ---
 
@@ -159,10 +185,30 @@ paperless-cli download 1234 --force
 - `--output, -o <path>` - Save to specific path (default: current directory)
 - `--force, -f` - Overwrite existing file
 
-**Behavior:**
-- Default filename: original filename from Paperless
-- Saves to current directory unless `--output` specified
-- Errors if file exists (use `--force` to overwrite)
+**Result:** `{ document_id, filename, path, size_bytes }`
+
+---
+
+### `upload <file>`
+
+Upload a document to Paperless-ngx.
+
+```bash
+paperless-cli upload receipt.pdf
+paperless-cli upload invoice.pdf --title="January Invoice" --correspondent=Amazon --create
+```
+
+**Arguments:**
+- `file` - Path to file to upload (required)
+
+**Flags:**
+- `--title, -t <value>` - Document title (defaults to filename)
+- `--correspondent <name>` - Correspondent name
+- `--type <name>` - Document type name
+- `--tag <name>` - Tag name (repeatable)
+- `--create` - Create correspondent/type/tag if not found
+
+**Result:** `{ task_id, filename, title }`
 
 ---
 
@@ -173,9 +219,8 @@ Edit document metadata.
 ```bash
 paperless-cli edit 1234 --title="Updated Title"
 paperless-cli edit 1234 --correspondent=comcast
-paperless-cli edit 1234 --type=receipt --correspondent=amazon
-paperless-cli edit 1234 --correspondent=newcorp --create
 paperless-cli edit 1234 --no-correspondent
+paperless-cli edit 1234 --correspondent=newcorp --create
 ```
 
 **Arguments:**
@@ -189,16 +234,7 @@ paperless-cli edit 1234 --no-correspondent
 - `--no-type` - Clear document type
 - `--create` - Create correspondent/type if not found
 
-**Behavior:**
-- At least one field flag required (errors otherwise)
-- Names matched case-insensitively
-- With `--create`: creates missing correspondent/type and confirms what was created
-- Without `--create`: errors if correspondent/type not found
-
-**Output:**
-```
-Created correspondent "NewCorp". Document 1234 updated.
-```
+**Result:** `{ id, updated_fields, document: DocumentSummary }`
 
 ---
 
@@ -215,8 +251,9 @@ paperless-cli similar 1234 --limit=10
 - `id` - Document ID (required)
 
 **Flags:**
-- `--limit, -l <n>` - Max results (default: 5, max: 100)
-- `--json` - Output raw JSON
+- `--limit, -l <n>` - Max results (default: 10)
+
+**Result:** `{ source_id, documents: DocumentSummary[] }`
 
 ---
 
@@ -236,23 +273,15 @@ paperless-cli add-tag 1234 "needs-review" --create
 **Flags:**
 - `--create` - Create tag if it doesn't exist
 
-**Behavior:**
-1. Normalize tag name (trim whitespace, lowercase, collapse spaces)
-2. Look up tag by name (case-insensitive)
-3. If not found and `--create`: create the tag
-4. If not found and no `--create`: error with list of similar tags if any
-5. If ambiguous match (partial): list matching tags and exit
-6. Add tag to document
+**Tag matching:** Exact match first (case-insensitive), then partial match. Ambiguous matches return an error envelope with matching tag names.
 
-**Tag matching:**
-- Exact match (case-insensitive) required
-- If multiple tags contain the search term but none match exactly, list all matches
+**Result:** `{ document_id, tag: { id, name }, already_had_tag }`
 
 ---
 
 ### `remove-tag <document-id> <tag-name>`
 
-Remove a tag from a document.
+Remove a tag from a document. Idempotent.
 
 ```bash
 paperless-cli remove-tag 1234 "needs-review"
@@ -262,9 +291,7 @@ paperless-cli remove-tag 1234 "needs-review"
 - `document-id` - Document ID (required)
 - `tag-name` - Tag name (required)
 
-**Behavior:**
-- Idempotent: silent success if document doesn't have tag
-- Same tag matching rules as `add-tag`
+**Result:** `{ document_id, tag: { id, name }, was_present }`
 
 ---
 
@@ -274,21 +301,9 @@ List all tags.
 
 ```bash
 paperless-cli tags
-paperless-cli tags --json
 ```
 
-**Flags:**
-- `--json` - Output raw JSON
-
-**Output:**
-```
-Tags (23 total):
-
-tax (45 documents)
-medical (12 documents)
-receipt (89 documents)
-...
-```
+**Result:** `{ count, tags: Tag[] }`
 
 ---
 
@@ -298,11 +313,9 @@ List all correspondents.
 
 ```bash
 paperless-cli correspondents
-paperless-cli correspondents --json
 ```
 
-**Flags:**
-- `--json` - Output raw JSON
+**Result:** `{ count, correspondents: Correspondent[] }`
 
 ---
 
@@ -312,11 +325,9 @@ List all document types.
 
 ```bash
 paperless-cli types
-paperless-cli types --json
 ```
 
-**Flags:**
-- `--json` - Output raw JSON
+**Result:** `{ count, document_types: DocumentType[] }`
 
 ---
 
@@ -326,19 +337,12 @@ Create a new tag.
 
 ```bash
 paperless-cli create-tag reviewed
-paperless-cli create-tag urgent --color="#ff0000"
-paperless-cli create-tag auto-file --match="invoice" --matching-algorithm=any
 ```
 
 **Arguments:**
 - `name` - Tag name (required)
 
-**Flags:**
-- `--color <hex>` - Color in hex format (e.g., #ff0000)
-- `--is-inbox-tag` - Mark as inbox tag
-- `--match <pattern>` - Auto-assignment match pattern
-- `--matching-algorithm <algo>` - Algorithm: any, all, literal, regex, fuzzy (default: any)
-- `--is-insensitive` - Case-insensitive matching (default: true)
+**Result:** Created `Tag` object.
 
 ---
 
@@ -348,16 +352,12 @@ Create a new correspondent.
 
 ```bash
 paperless-cli create-correspondent comcast
-paperless-cli create-correspondent amazon --match="amazon"
 ```
 
 **Arguments:**
 - `name` - Correspondent name (required)
 
-**Flags:**
-- `--match <pattern>` - Auto-assignment match pattern
-- `--matching-algorithm <algo>` - Algorithm: any, all, literal, regex, fuzzy (default: any)
-- `--is-insensitive` - Case-insensitive matching (default: true)
+**Result:** Created `Correspondent` object.
 
 ---
 
@@ -367,16 +367,12 @@ Create a new document type.
 
 ```bash
 paperless-cli create-type receipt
-paperless-cli create-type invoice --match="invoice"
 ```
 
 **Arguments:**
 - `name` - Document type name (required)
 
-**Flags:**
-- `--match <pattern>` - Auto-assignment match pattern
-- `--matching-algorithm <algo>` - Algorithm: any, all, literal, regex, fuzzy (default: any)
-- `--is-insensitive` - Case-insensitive matching (default: true)
+**Result:** Created `DocumentType` object.
 
 ---
 
@@ -386,21 +382,9 @@ Show system statistics.
 
 ```bash
 paperless-cli stats
-paperless-cli stats --json
 ```
 
-**Flags:**
-- `--json` - Output raw JSON
-
-**Output:**
-```
-Paperless-ngx v2.4.0
-
-Documents: 1,234
-Tags: 23
-Correspondents: 45
-Document Types: 8
-```
+**Result:** Raw statistics object from the API.
 
 ---
 
@@ -409,35 +393,30 @@ Document Types: 8
 ```
 paperless-cli/
 ├── src/
-│   ├── main.ts                # CLI entrypoint
+│   ├── main.ts                   # CLI entrypoint, command tree, error handling
 │   ├── cli/
-│   │   ├── search.ts
-│   │   ├── list.ts
-│   │   ├── get.ts
-│   │   ├── download.ts
-│   │   ├── edit.ts
-│   │   ├── similar.ts
-│   │   ├── addTag.ts
-│   │   ├── removeTag.ts
-│   │   ├── tags.ts
-│   │   ├── correspondents.ts
-│   │   ├── types.ts
-│   │   ├── createTag.ts
-│   │   ├── createCorrespondent.ts
-│   │   ├── createType.ts
-│   │   └── stats.ts
+│   │   ├── index.ts              # Command + handler exports
+│   │   ├── options.ts            # Shared CLI options/args
+│   │   ├── helpers.ts            # Tag resolution, flag ordering
+│   │   └── commands/             # Command implementations
 │   ├── client/
-│   │   └── PaperlessClient.ts # Effect service
+│   │   └── PaperlessClient.ts    # Effect service
 │   ├── schema/
 │   │   ├── Document.ts
 │   │   ├── Tag.ts
 │   │   ├── Correspondent.ts
 │   │   └── DocumentType.ts
+│   ├── envelope/
+│   │   ├── index.ts              # Envelope constructors + output
+│   │   ├── types.ts              # Envelope type definitions
+│   │   ├── truncate.ts           # Context-protecting truncation
+│   │   ├── next-actions.ts       # HATEOAS action templates
+│   │   └── document-result.ts    # Document enrichment builders
 │   ├── errors/
-│   │   └── index.ts           # Typed domain errors
-│   └── format/
-│       └── output.ts          # Pretty printing
-├── flake.nix
+│   │   └── index.ts              # Typed domain errors
+│   └── test/
+│       ├── fixtures.ts           # Sample data
+│       └── MockPaperlessClient.ts
 ├── package.json
 └── tsconfig.json
 ```
@@ -446,78 +425,29 @@ paperless-cli/
 
 ## Error Handling
 
-### Domain Errors (Effect typed)
+### Error Codes
 
-```typescript
-// Auth errors
-class InvalidToken extends Data.TaggedError("InvalidToken") {}
-class MissingCredentials extends Data.TaggedError("MissingCredentials") {}
+All errors are returned as error envelopes with a `code` and `fix` field:
 
-// Not found errors
-class DocumentNotFound extends Data.TaggedError("DocumentNotFound")<{ id: number }> {}
-class TagNotFound extends Data.TaggedError("TagNotFound")<{ name: string }> {}
-class CorrespondentNotFound extends Data.TaggedError("CorrespondentNotFound")<{ name: string }> {}
-class DocumentTypeNotFound extends Data.TaggedError("DocumentTypeNotFound")<{ name: string }> {}
-
-// Validation errors
-class InvalidDocumentId extends Data.TaggedError("InvalidDocumentId")<{ value: string }> {}
-class InvalidQuery extends Data.TaggedError("InvalidQuery")<{ reason: string }> {}
-class AmbiguousMatch extends Data.TaggedError("AmbiguousMatch")<{ type: string; matches: string[] }> {}
-
-// Network errors
-class ConnectionFailed extends Data.TaggedError("ConnectionFailed")<{ url: string }> {}
-class Timeout extends Data.TaggedError("Timeout")<{ url: string }> {}
-class ServerError extends Data.TaggedError("ServerError")<{ status: number; message: string }> {}
-```
-
-### Exit Codes
-
-- `0` - Success
-- `1` - Any error
+| Error Code | Fix Guidance |
+|-----------|-------------|
+| `MissingCredentials` | Set PAPERLESS_URL and PAPERLESS_TOKEN |
+| `InvalidToken` | Check token, regenerate from Settings > Users |
+| `ConnectionFailed` | Check URL and server status |
+| `DocumentNotFound` | Verify ID, search for documents |
+| `TagNotFound` | Check available tags, use --create |
+| `AmbiguousMatch` | Specify the full tag name |
+| `CorrespondentNotFound` | Check correspondents, use --create |
+| `DocumentTypeNotFound` | Check types, use --create |
+| `ServerError` | Check server logs |
+| `InvalidValue` | Check command syntax (flag ordering) |
+| `UnknownError` | Generic fallback |
 
 ### Retry Strategy
 
 Network failures (connection refused, timeout) retry with exponential backoff:
 - 3 retries: 1s, 2s, 4s delays
-- Use Effect's `Schedule.exponential` with `retry`
-
----
-
-## API Integration
-
-### Pagination
-
-- Paperless API paginates at 25 items per page
-- CLI auto-paginates transparently up to `--limit`
-- Hard cap at 100 results (4 API calls max)
-
-### Name Normalization
-
-All tag/correspondent/type names are normalized before API calls:
-- Trim leading/trailing whitespace
-- Collapse multiple spaces to single space
-- Convert to lowercase for comparison
-
-### Endpoints Used
-
-| CLI Command | HTTP Method | Endpoint |
-|-------------|-------------|----------|
-| `search` | GET | `/api/documents/?query=...` |
-| `list` | GET | `/api/documents/?ordering=-added` |
-| `get` | GET | `/api/documents/{id}/` |
-| `download` | GET | `/api/documents/{id}/download/` |
-| `edit` | PATCH | `/api/documents/{id}/` |
-| `similar` | GET | `/api/documents/?more_like_id=...` |
-| `tags` | GET | `/api/tags/` |
-| `correspondents` | GET | `/api/correspondents/` |
-| `types` | GET | `/api/document_types/` |
-| `add-tag` | GET | `/api/tags/?name__iexact=...` |
-| `add-tag` | PATCH | `/api/documents/{id}/` |
-| `remove-tag` | PATCH | `/api/documents/{id}/` |
-| `create-tag` | POST | `/api/tags/` |
-| `create-correspondent` | POST | `/api/correspondents/` |
-| `create-type` | POST | `/api/document_types/` |
-| `stats` | GET | `/api/statistics/` |
+- Uses Effect's `Schedule.exponential` with `retry`
 
 ---
 
@@ -527,34 +457,16 @@ All tag/correspondent/type names are normalized before API calls:
 - All GET requests (read)
 - PATCH document metadata (title, correspondent, type, tags)
 - POST to create tags/correspondents/types
+- POST to upload documents
 
 ### Blocked Operations
 - DELETE anything
 - Bulk operations
 - Document content modification
 
-### Implementation
-
-```typescript
-const allowedMutations = [
-  { method: "PATCH", pattern: /^\/api\/documents\/\d+\/$/ },
-  { method: "POST", pattern: /^\/api\/tags\/$/ },
-  { method: "POST", pattern: /^\/api\/correspondents\/$/ },
-  { method: "POST", pattern: /^\/api\/document_types\/$/ },
-] as const;
-```
-
 ---
 
 ## Claude Skill Specification
-
-### File Structure
-
-```
-~/.claude/skills/paperless/
-├── SKILL.md
-└── CLI-REFERENCE.md
-```
 
 ### SKILL.md
 
@@ -576,36 +488,7 @@ Use this skill when the user wants to:
 
 ## Usage
 
-Use the `paperless-cli` command to interact with Paperless-ngx.
-
-See @CLI-REFERENCE.md for full command documentation.
-
-## Behavior
-
-Only respond to explicit requests about documents. Do not proactively suggest searches.
-
-## Examples
-
-**User says:** "Find my tax documents from 2023"
-**Action:** Run `paperless-cli search "tax 2023"` or `paperless-cli search --tag=tax --after=2023-01-01 --before=2024-01-01`
-
-**User says:** "Show me the full W-2"
-**Action:** Run `paperless-cli get <id>` using the ID from search results
-
-**User says:** "What tags do I have?"
-**Action:** Run `paperless-cli tags`
-
-**User says:** "Tag that document as reviewed"
-**Action:** Run `paperless-cli add-tag <id> reviewed`
-
-**User says:** "Find similar documents to this receipt"
-**Action:** Run `paperless-cli similar <id>`
-
-**User says:** "What's in my inbox?"
-**Action:** Run `paperless-cli list --inbox`
-
-**User says:** "Download that PDF"
-**Action:** Run `paperless-cli download <id>`
+Use the `paperless-cli` command. All output is JSON. Parse the `ok` field to determine success/failure. Use `next_actions` to discover follow-up commands.
 
 ## Workflow
 
@@ -614,119 +497,6 @@ Only respond to explicit requests about documents. Do not proactively suggest se
 3. Use `add-tag`/`remove-tag` to organize
 4. Use `similar` to find related documents
 5. Use `download` to save original files
-```
-
-### CLI-REFERENCE.md
-
-```markdown
-# paperless-cli Reference
-
-## Commands
-
-### search [query]
-Search documents by content. Query optional if using filters.
-
-Flags:
-- `--tag, -t <name>` - Filter by tag (repeatable)
-- `--correspondent, -c <name>` - Filter by correspondent
-- `--type, -d <name>` - Filter by document type
-- `--after <date>` - Created after (YYYY-MM-DD or -Nd/-Nm/-Ny)
-- `--before <date>` - Created before
-- `--sort <field>` - Sort by: created, added, modified, title, correspondent, type
-- `--limit, -l <n>` - Max results (default: 10, max: 100)
-- `--json` - JSON output
-
-### list
-List recent documents.
-
-Flags:
-- `--inbox` - Show inbox documents only
-- `--tag, -t <name>` - Filter by tag
-- `--correspondent, -c <name>` - Filter by correspondent
-- `--type, -d <name>` - Filter by type
-- `--sort <field>` - Sort field (default: added)
-- `--limit, -l <n>` - Max results
-- `--json` - JSON output
-
-### get <id>
-Get document details and content.
-
-Flags:
-- `--content-only` - Only output text
-- `--max-length, -m <n>` - Truncate content
-- `--json` - JSON output
-
-### download <id>
-Download original document file.
-
-Flags:
-- `--output, -o <path>` - Save path
-- `--force, -f` - Overwrite existing
-
-### edit <id>
-Edit document metadata.
-
-Flags:
-- `--title <value>` - Set title
-- `--correspondent <name>` - Set correspondent
-- `--type <name>` - Set document type
-- `--no-correspondent` - Clear correspondent
-- `--no-type` - Clear document type
-- `--create` - Create correspondent/type if not found
-
-### similar <id>
-Find similar documents.
-
-Flags:
-- `--limit, -l <n>` - Max results (default: 5)
-- `--json` - JSON output
-
-### add-tag <document-id> <tag-name>
-Add tag to document.
-
-Flags:
-- `--create` - Create tag if not found
-
-### remove-tag <document-id> <tag-name>
-Remove tag from document.
-
-### tags
-List all tags with document counts.
-
-### correspondents
-List all correspondents with document counts.
-
-### types
-List all document types with document counts.
-
-### create-tag <name>
-Create a new tag.
-
-Flags:
-- `--color <hex>` - Color
-- `--is-inbox-tag` - Mark as inbox tag
-- `--match <pattern>` - Match pattern
-- `--matching-algorithm <algo>` - any, all, literal, regex, fuzzy
-- `--is-insensitive` - Case-insensitive matching
-
-### create-correspondent <name>
-Create a new correspondent.
-
-Flags:
-- `--match <pattern>` - Match pattern
-- `--matching-algorithm <algo>` - any, all, literal, regex, fuzzy
-- `--is-insensitive` - Case-insensitive matching
-
-### create-type <name>
-Create a new document type.
-
-Flags:
-- `--match <pattern>` - Match pattern
-- `--matching-algorithm <algo>` - any, all, literal, regex, fuzzy
-- `--is-insensitive` - Case-insensitive matching
-
-### stats
-Show system statistics (document count, tags, version).
 
 ## Environment
 

@@ -1,6 +1,7 @@
 import { HelpDoc, ValidationError } from '@effect/cli'
-import { Console, Effect } from 'effect'
+import { Effect } from 'effect'
 import type { PaperlessClient, PaperlessClientError } from '../client/PaperlessClient.ts'
+import * as Envelope from '../envelope/index.ts'
 import { TagNotFound, AmbiguousMatch } from '../errors/index.ts'
 import type { Tag, TagList } from '../schema/index.ts'
 
@@ -42,8 +43,6 @@ export const commandOptions: Record<string, Set<string>> = {
     '--limit',
     '-l',
     '--all',
-    '--count',
-    '--json',
   ]),
   list: new Set([
     '--inbox',
@@ -58,23 +57,21 @@ export const commandOptions: Record<string, Set<string>> = {
     '--limit',
     '-l',
     '--all',
-    '--count',
-    '--json',
   ]),
-  get: new Set(['--content-only', '--max-length', '-m', '--json']),
+  get: new Set(['--max-length', '-m']),
   download: new Set(['--output', '-o', '--force', '-f']),
   upload: new Set(['--title', '-t', '--correspondent', '--type', '--tag', '--create']),
-  similar: new Set(['--limit', '-l', '--json']),
+  similar: new Set(['--limit', '-l']),
   edit: new Set(['--title', '--correspondent', '--type', '--no-correspondent', '--no-type', '--create']),
   'add-tag': new Set(['--create']),
   'remove-tag': new Set([]),
   'create-tag': new Set([]),
   'create-correspondent': new Set([]),
   'create-type': new Set([]),
-  tags: new Set(['--json']),
-  correspondents: new Set(['--json']),
-  types: new Set(['--json']),
-  stats: new Set(['--json']),
+  tags: new Set([]),
+  correspondents: new Set([]),
+  types: new Set([]),
+  stats: new Set([]),
 }
 
 // Helper to detect flag-after-positional errors and provide better messages
@@ -111,17 +108,7 @@ export const handleFlagOrderingError = (
       // Check if this flag expects a value (not a boolean flag)
       if (
         !arg.includes('=') &&
-        ![
-          '--all',
-          '--count',
-          '--json',
-          '--inbox',
-          '--force',
-          '--create',
-          '--content-only',
-          '--no-correspondent',
-          '--no-type',
-        ].includes(arg)
+        !['--all', '--inbox', '--force', '--create', '--no-correspondent', '--no-type'].includes(arg)
       ) {
         expectingValue = true
       }
@@ -138,7 +125,13 @@ export const handleFlagOrderingError = (
 
   const correctedArgs = ['paperless-cli', commandName, ...flags, ...positional].join(' ')
 
-  return Console.error(
-    `Error: Flag '${unknownFlag}' must appear before positional arguments.\n` + `Hint: ${correctedArgs}`,
+  return Envelope.output(
+    Envelope.error(
+      commandName,
+      `Flag '${unknownFlag}' must appear before positional arguments.`,
+      'InvalidValue',
+      correctedArgs,
+      [],
+    ),
   )
 }
